@@ -16,9 +16,6 @@ from Bio import Entrez
 from urllib2 import HTTPError
 import logging
 
-logging.basicConfig(format='%(message)s',level=logging.ERROR)
-logger = logging.getLogger()
-
 
 from argparse import ArgumentParser
 from argparse import RawDescriptionHelpFormatter
@@ -66,14 +63,17 @@ USAGE
         parser.add_argument("gis",metavar="GIFILE",help="File containing a newline-separated list of gi numbers")
         parser.add_argument('-e','--email',required=True,help="Email address for NCBI Entrez")
         parser.add_argument('-d','--database',help="NCBI database. Default 'protein'.")
-        parser.set_defaults(database='protein')
+        parser.set_defaults(database='protein',verbose=False)
 
         # Process arguments
         args = parser.parse_args()
 
         verbose = args.verbose 
         if verbose:
-            logger.setLevel(logging.INFO)
+            logging.basicConfig(format='%(message)s',level=logging.INFO)
+        else:
+            logging.basicConfig(format='%(message)s',level=logging.ERROR)
+
                         
         if not os.path.exists(args.gis):
             raise Exception("gi list file %s does not exist" % args.gis)
@@ -83,38 +83,37 @@ USAGE
         Entrez.email = args.email
         
         # Read the gis
-        logger.info('Reading gis')       
+        logging.info('Reading gis')       
         gis = []
         with open(args.gis,'r') as f:
             for line in f:
                 gis.append(line.strip())
-        logger.info('Read %d gis from %s' % (len(gis),args.gis))
-        print ','.join(gis) 
+        logging.info('Read %d gis from %s' % (len(gis),args.gis))
         # Post to Entrez
-        logger.info('POSTing to Entrez')            
+        logging.info('POSTing to Entrez')            
         result = Entrez.read(Entrez.epost('protein',id=','.join(gis)))
         querykey = result['QueryKey']
         webenv = result['WebEnv']
-        logger.info('Done POSTing to Entrez')
+        logging.info('Done POSTing to Entrez')
             
         # Download a batch at a time
         count = len(gis)
         batchsize = 200
         for start in range(0, count, batchsize):
             end = min(count, start + batchsize)
-            logger.info("Going to download record %i to %i" % (start+1, end))
+            logging.info("Going to download record %i to %i" % (start+1, end))
             attempt = 1
             while attempt <= 3:
                 try:
-                    logger.info('Attempt %d' % attempt)
+                    logging.info('Attempt %d' % attempt)
                     handle = Entrez.efetch(db=db, retmode="xml",
                         retstart=start, retmax=batchsize,
                         webenv=webenv, query_key=querykey)
                     attempt = 4
                 except HTTPError as err:
                     if 500 <= err.code <= 599:
-                        logger.info("Received error from server %s" % err)
-                        logger.info("Attempt %i of 3" % attempt)
+                        logging.info("Received error from server %s" % err)
+                        logging.info("Attempt %i of 3" % attempt)
                         attempt += 1
                         time.sleep(15)
                     else:
