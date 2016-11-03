@@ -10,14 +10,14 @@ bigDump performs a large fetch and export from NCBI using a list of gi numbers
 @license: GPL v2.0
 '''
 
-import sys, os, time
+import sys, os, time, traceback
 
 from Bio import Entrez
 from urllib2 import HTTPError
 import logging
 
+logging.basicConfig(format='%(message)s',level=logging.ERROR)
 logger = logging.getLogger()
-logger.setLevel(logging.ERROR)
 
 
 from argparse import ArgumentParser
@@ -30,9 +30,6 @@ __updated__ = '2016-11-03'
 
 DEBUG = 1
 PROFILE = 0
-
-
-BATCH_SIZE = 200 # Size of the download batch
 
 
 def main(argv=None): # IGNORE:C0111
@@ -89,27 +86,31 @@ USAGE
         logger.info('Reading gis')       
         gis = []
         with open(args.gis,'r') as f:
-            gis = f.read()    
+            for line in f:
+                gis.append(line.strip())
         logger.info('Read %d gis from %s' % (len(gis),args.gis))
-        
+        print ','.join(gis) 
         # Post to Entrez
         logger.info('POSTing to Entrez')            
-        result = Entrez.ePost('protein',id=','.join(gis))
+        result = Entrez.read(Entrez.epost('protein',id=','.join(gis)))
         querykey = result['QueryKey']
         webenv = result['WebEnv']
         logger.info('Done POSTing to Entrez')
             
         # Download a batch at a time
         count = len(gis)
-        for start in range(0, count, BATCH_SIZE):
-            end = min(count, start + BATCH_SIZE)
+        batchsize = 200
+        for start in range(0, count, batchsize):
+            end = min(count, start + batchsize)
             logger.info("Going to download record %i to %i" % (start+1, end))
             attempt = 1
             while attempt <= 3:
                 try:
-                    handle = Entrez.efetch(db=db, rettype="fasta", retmode="text",
-                        retstart=start, retmax=BATCH_SIZE,
+                    logger.info('Attempt %d' % attempt)
+                    handle = Entrez.efetch(db=db, retmode="xml",
+                        retstart=start, retmax=batchsize,
                         webenv=webenv, query_key=querykey)
+                    attempt = 4
                 except HTTPError as err:
                     if 500 <= err.code <= 599:
                         logger.info("Received error from server %s" % err)
@@ -118,9 +119,14 @@ USAGE
                         time.sleep(15)
                     else:
                         raise
-            data = handle.read()
+            for r in Entrez.parse(handle):
+                try:
+                    gi=int([x for x in r['GBSeq_other-seqids'] if "gi" in x][0].split("|")[1])
+                except ValueError:
+                    gi=None
+                print '>gi|{gi}|gb|{acc}| {definition}\n{seq}'.format(gi=gi,acc=r["GBSeq_primary-accession"],definition=r["GBSeq_definition"],seq=r["GBSeq_sequence"].upper())
+
             handle.close()
-            print data
 
         return 0
 
@@ -128,12 +134,8 @@ USAGE
         ### handle keyboard interrupt ###
         return 0
     
-    except Exception, e:
-        if DEBUG:
-            raise(e)
-        indent = len(program_name) * " "
-        sys.stderr.write(program_name + ": " + repr(e) + "\n")
-        sys.stderr.write(indent + "  for help use --help")
+    except Exception as e:
+        sys.stderr.write('Error %s\n%s\n' % (str(e),traceback.format_exc()))
         return 2
 
 if __name__ == "__main__":
